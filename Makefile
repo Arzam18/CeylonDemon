@@ -23,7 +23,9 @@ LDFLAGS  := -static
 
 ifeq ($(ARCH),android-arm64)
     ARCHFLAGS := -march=armv8-a+simd -mtune=cortex-a53
-    LDFLAGS  :=
+    # Link libc++ statically so the standalone engine does not depend on
+    # libc++_shared.so being discoverable by the chess GUI at runtime.
+    LDFLAGS  := -static-libstdc++
 else ifeq ($(ARCH),native)
     ARCHFLAGS := -march=native
 else ifeq ($(ARCH),x86-64-bmi2)
