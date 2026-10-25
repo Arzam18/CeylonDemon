@@ -64,6 +64,14 @@ jobs:
           test -s dist/CeylonDemon-3.3-android-arm64
           file dist/CeylonDemon-3.3-android-arm64
           "$TOOLCHAIN/llvm-readelf" -h dist/CeylonDemon-3.3-android-arm64
+          "$TOOLCHAIN/llvm-readelf" -d dist/CeylonDemon-3.3-android-arm64 | tee dist/dynamic-section.txt
+
+          # A standalone engine must not require libc++_shared.so at launch.
+          if grep -q 'libc++_shared\.so' dist/dynamic-section.txt; then
+            echo "::error::Binary still depends on libc++_shared.so; static C++ runtime linking failed."
+            exit 1
+          fi
+          echo "Verified: no libc++_shared.so runtime dependency."
 
       - name: Package Android build
         shell: bash
