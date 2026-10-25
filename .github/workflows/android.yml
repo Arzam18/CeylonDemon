@@ -8,13 +8,16 @@ on:
       - "Makefile"
       - "src/**"
       - "networks/**"
+      - "resonance_simd.h"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-android:
+    name: Build ARM64 NEON UCI engine
     runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -24,15 +27,27 @@ jobs:
         with:
           ndk-version: r27c
 
-      - name: Check embedded NNUE network
+      - name: Verify and prepare embedded NNUE network
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f networks/ceylondemon-3.1-resonance-v12-400m-full-scratch-e8.aa ]]; then
-            echo "::error::Missing required Resonance v12 network: networks/ceylondemon-3.1-resonance-v12-400m-full-scratch-e8.aa"
-            echo "The source ZIP does not include this network. Add the compatible .aa file to networks/ before building."
+          NETFILE="networks/ceylondemon-3.1-resonance-v12-400m-full-scratch-e8.aa"
+
+          if [[ ! -s "$NETFILE" ]]; then
+            echo "::error::Required NNUE network is missing or empty: $NETFILE"
+            echo "Files currently in networks/:"
+            find networks -maxdepth 1 -type f -printf '%f (%s bytes)\\n' 2>/dev/null || true
             exit 1
           fi
+
+          echo "Found embedded network:"
+          ls -lh "$NETFILE"
+
+          # Clang's integrated assembler may not resolve .incbin through the
+          # -Wa,-I flag consistently. resonance_embedded.h uses the basename,
+          # so place a copy in the compiler's current working directory.
+          cp "$NETFILE" "$(basename "$NETFILE")"
+          test -s "$(basename "$NETFILE")"
 
       - name: Build ARM64 NEON engine
         shell: bash
@@ -40,10 +55,13 @@ jobs:
           set -euo pipefail
           TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export PATH="$TOOLCHAIN:$PATH"
+
           make clean
           make -j2 ARCH=android-arm64 \
             CXX="$TOOLCHAIN/aarch64-linux-android24-clang++" \
             EXE=dist/CeylonDemon-3.3-android-arm64
+
+          test -s dist/CeylonDemon-3.3-android-arm64
           file dist/CeylonDemon-3.3-android-arm64
           "$TOOLCHAIN/llvm-readelf" -h dist/CeylonDemon-3.3-android-arm64
 
