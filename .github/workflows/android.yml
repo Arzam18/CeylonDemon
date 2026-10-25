@@ -1,0 +1,68 @@
+name: Build CeylonDemon Android ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/android.yml"
+      - "Makefile"
+      - "src/**"
+      - "networks/**"
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Check embedded NNUE network
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f networks/ceylondemon-3.1-resonance-v12-400m-full-scratch-e8.aa ]]; then
+            echo "::error::Missing required Resonance v12 network: networks/ceylondemon-3.1-resonance-v12-400m-full-scratch-e8.aa"
+            echo "The source ZIP does not include this network. Add the compatible .aa file to networks/ before building."
+            exit 1
+          fi
+
+      - name: Build ARM64 NEON engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export PATH="$TOOLCHAIN:$PATH"
+          make clean
+          make -j2 ARCH=android-arm64 \
+            CXX="$TOOLCHAIN/aarch64-linux-android24-clang++" \
+            EXE=dist/CeylonDemon-3.3-android-arm64
+          file dist/CeylonDemon-3.3-android-arm64
+          "$TOOLCHAIN/llvm-readelf" -h dist/CeylonDemon-3.3-android-arm64
+
+      - name: Package Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp dist/CeylonDemon-3.3-android-arm64 release/
+          cp LICENSE release/
+          cd release
+          zip -9 CeylonDemon-3.3-android-arm64.zip CeylonDemon-3.3-android-arm64 LICENSE
+          sha256sum CeylonDemon-3.3-android-arm64.zip > SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CeylonDemon-3.3-android-arm64
+          path: |
+            release/CeylonDemon-3.3-android-arm64.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
