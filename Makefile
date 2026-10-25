@@ -11,7 +11,7 @@ CXX      ?= g++
 ARCH     ?= x86-64-avx2
 EVALFILE ?= networks/ceylondemon-3.1-resonance-v12-400m-full-scratch-e8.aa
 TUNE     ?= 0
-EXE      ?= dist/CeylonDemon-3.3-$(ARCH).exe
+EXE      ?= dist/CeylonDemon-3.3-$(ARCH)
 
 SRC := src/main.cpp
 
@@ -21,7 +21,10 @@ ifeq ($(TUNE),1)
 endif
 LDFLAGS  := -static
 
-ifeq ($(ARCH),native)
+ifeq ($(ARCH),android-arm64)
+    ARCHFLAGS := -march=armv8-a+simd -mtune=cortex-a53
+    LDFLAGS  :=
+else ifeq ($(ARCH),native)
     ARCHFLAGS := -march=native
 else ifeq ($(ARCH),x86-64-bmi2)
     ARCHFLAGS := -m64 -mpopcnt -msse -msse2 -mssse3 -msse4.1 -mavx2 -mbmi -mbmi2
