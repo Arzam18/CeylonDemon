@@ -28,6 +28,9 @@
 #if defined(__AVX2__) || defined(USE_AVX2)
     #define RESONANCE_AVX2 1
     #include <immintrin.h>
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+    #define RESONANCE_NEON 1
+    #include <arm_neon.h>
 #endif
 
 namespace resonance::simd {
@@ -53,6 +56,11 @@ inline void addWeights(int16_t* dst, const int16_t* src, const int16_t* w, int n
         const __m256i b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w + i));
         _mm256_store_si256(reinterpret_cast<__m256i*>(dst + i), _mm256_add_epi16(a, b));
     }
+#elif defined(RESONANCE_NEON)
+    for (int i = 0; i < n; i += 8) {
+        int16x8_t a = vld1q_s16(src + i), b = vld1q_s16(w + i);
+        vst1q_s16(dst + i, vaddq_s16(a, b));
+    }
 #else
     for (int i = 0; i < n; i++) dst[i] = int16_t(src[i] + w[i]);
 #endif
@@ -64,6 +72,11 @@ inline void subWeights(int16_t* dst, const int16_t* src, const int16_t* w, int n
         const __m256i a = _mm256_load_si256(reinterpret_cast<const __m256i*>(src + i));
         const __m256i b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w + i));
         _mm256_store_si256(reinterpret_cast<__m256i*>(dst + i), _mm256_sub_epi16(a, b));
+    }
+#elif defined(RESONANCE_NEON)
+    for (int i = 0; i < n; i += 8) {
+        int16x8_t a = vld1q_s16(src + i), b = vld1q_s16(w + i);
+        vst1q_s16(dst + i, vsubq_s16(a, b));
     }
 #else
     for (int i = 0; i < n; i++) dst[i] = int16_t(src[i] - w[i]);
@@ -86,6 +99,13 @@ inline void moveWeightDeltas(int16_t* dst, const int16_t* src,
             v = _mm256_sub_epi16(v, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w[1] + i)));
         v = _mm256_add_epi16(v, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(w[Capture ? 2 : 1] + i)));
         _mm256_store_si256(reinterpret_cast<__m256i*>(dst + i), v);
+    }
+#elif defined(RESONANCE_NEON)
+    for (int i = 0; i < n; i += 8) {
+        int16x8_t v = vsubq_s16(vld1q_s16(src + i), vld1q_s16(w[0] + i));
+        if constexpr (Capture) v = vsubq_s16(v, vld1q_s16(w[1] + i));
+        v = vaddq_s16(v, vld1q_s16(w[Capture ? 2 : 1] + i));
+        vst1q_s16(dst + i, v);
     }
 #else
     for (int i = 0; i < n; ++i) {
@@ -118,6 +138,15 @@ inline void applyWeightDeltas(int16_t* dst, const int16_t* src,
         }
         _mm256_store_si256(reinterpret_cast<__m256i*>(dst + i), value);
     }
+#elif defined(RESONANCE_NEON)
+    for (int i = 0; i < n; i += 8) {
+        int16x8_t value = vld1q_s16(src + i);
+        for (int d = 0; d < count; d++) {
+            int16x8_t w = vld1q_s16(weights[d] + i);
+            value = adds[d] ? vaddq_s16(value, w) : vsubq_s16(value, w);
+        }
+        vst1q_s16(dst + i, value);
+    }
 #else
     for (int i = 0; i < n; i++) {
         int16_t value = src[i];
@@ -129,7 +158,13 @@ inline void applyWeightDeltas(int16_t* dst, const int16_t* src,
 #endif
 }
 
-inline void copy(int16_t* dst, const int16_t* src, int n) { std::copy(src, src + n, dst); }
+inline void copy(int16_t* dst, const int16_t* src, int n) {
+#if defined(RESONANCE_NEON)
+    for (int i = 0; i < n; i += 8) vst1q_s16(dst + i, vld1q_s16(src + i));
+#else
+    std::copy(src, src + n, dst);
+#endif
+}
 
 // ----------------------------------------------------------------------------
 // Clipped ReLU: int16 accumulator -> uint8 activation in [0, 127].
@@ -152,6 +187,15 @@ inline void clippedRelu(uint8_t* out, const int16_t* in, int n) {
         const __m256i packed = _mm256_packus_epi16(a, b);
         _mm256_store_si256(reinterpret_cast<__m256i*>(out + i),
                            _mm256_permute4x64_epi64(packed, 0xD8));
+    }
+#elif defined(RESONANCE_NEON)
+    const int16x8_t zero = vdupq_n_s16(0), cap = vdupq_n_s16(127);
+    for (int i = 0; i < n; i += 16) {
+        int16x8_t a = vmaxq_s16(zero, vminq_s16(cap, vld1q_s16(in + i)));
+        int16x8_t b = vmaxq_s16(zero, vminq_s16(cap, vld1q_s16(in + i + 8)));
+        uint8x8_t pa = vmovn_u16(vreinterpretq_u16_s16(a));
+        uint8x8_t pb = vmovn_u16(vreinterpretq_u16_s16(b));
+        vst1q_u8(out + i, vcombine_u8(pa, pb));
     }
 #else
     for (int i = 0; i < n; i++) out[i] = uint8_t(std::clamp(int(in[i]), 0, 127));
@@ -196,6 +240,14 @@ inline void pairwiseClipped(uint8_t* out, const int16_t* acc, int half) {
         const __m256i packed = _mm256_packus_epi16(p0, p1);
         _mm256_store_si256(reinterpret_cast<__m256i*>(out + i),
                            _mm256_permute4x64_epi64(packed, 0xD8));
+    }
+#elif defined(RESONANCE_NEON)
+    const int16x8_t zero = vdupq_n_s16(0), cap = vdupq_n_s16(127), round = vdupq_n_s16(64);
+    for (int i = 0; i < half; i += 8) {
+        int16x8_t a = vmaxq_s16(zero, vminq_s16(cap, vld1q_s16(acc + i)));
+        int16x8_t b = vmaxq_s16(zero, vminq_s16(cap, vld1q_s16(acc + half + i)));
+        int16x8_t p = vshrq_n_s16(vaddq_s16(vmulq_s16(a, b), round), 7);
+        vst1_u8(out + i, vmovn_u16(vreinterpretq_u16_s16(p)));
     }
 #else
     for (int i = 0; i < half; i++) {
