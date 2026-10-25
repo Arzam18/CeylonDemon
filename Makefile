@@ -33,9 +33,9 @@ else
 endif
 
 # The network is linked into the executable so a release is a single file.
-# .incbin resolves against the assembler include path, hence -Wa,-I.
+# .incbin uses the assembler include path; Android workflow also copies the network basename to the working directory.
 ifneq (,$(wildcard $(EVALFILE)))
-    NETFLAGS := -DCEYLON_EMBEDDED_NET=$(notdir $(EVALFILE)) -Wa,-I$(dir $(EVALFILE))
+    NETFLAGS := -DCEYLON_EMBEDDED_NET=$(notdir $(EVALFILE)) -Wa,-I,$(abspath $(dir $(EVALFILE)))
 else
     $(info No $(EVALFILE) found - the engine will look for a network on disk.)
     NETFLAGS :=
